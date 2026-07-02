@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# 本地推送结果备份（如果推送失败时会生成）
+push_result.md
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
