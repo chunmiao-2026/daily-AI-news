@@ -1,16 +1,16 @@
-name: 行业监测周报
+name: 行业监测日报
 
 on:
-  # 每周六 9:13 推送（北京时间 = UTC 1:13）
+  # 每天 9:13 推送（北京时间 = UTC 1:13）
   schedule:
-    - cron: "13 1 * * 6"
+    - cron: "13 1 * * *"
 
   # 也支持手动触发
   workflow_dispatch:
 
 jobs:
-  weekly-report:
-    name: 生成行业周报并推送微信
+  daily-report:
+    name: 生成行业日报并推送微信
     runs-on: ubuntu-latest
 
     steps:
@@ -27,7 +27,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install feedparser
 
-      - name: 运行周报脚本
+      - name: 运行日报脚本
         env:
           SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
         run: python weekly_report.py
