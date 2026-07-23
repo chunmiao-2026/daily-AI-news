@@ -42,17 +42,17 @@ RSS_SOURCES = {
     "ai_industry": [    # 🏭 AI 产业动态 — 一线科技媒体
         {"name": "TechCrunch AI",         "url": "https://techcrunch.com/category/artificial-intelligence/feed/"},
         {"name": "VentureBeat AI",        "url": "https://venturebeat.com/category/ai/feed/"},
-        {"name": "The Verge AI",          "url": "https://www.theverge.com/ai-artificial-intelligence/rss.xml"},
+        {"name": "The Verge AI",          "url": "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml"},
         {"name": "Ars Technica",          "url": "https://feeds.arstechnica.com/arstechnica/index"},
     ],
     "ai_research": [    # 🔬 AI 前沿研究 — 学术 + 深度技术
         {"name": "ArXiv cs.AI",          "url": "https://rss.arxiv.org/rss/cs.AI"},
-        {"name": "MIT Tech Review AI",   "url": "https://www.technologyreview.com/topic/artificial-intelligence/rss/"},
+        {"name": "MIT Tech Review",      "url": "https://www.technologyreview.com/feed/"},
         {"name": "Wired AI",             "url": "https://www.wired.com/feed/tag/ai/latest/rss"},
         {"name": "Hugging Face Papers",  "url": "https://huggingface.co/api/daily_papers", "format": "json"},
     ],
     "ai_chinese": [     # 📰 中文 AI 资讯 — 国内一线
-        {"name": "机器之心", "url": "https://jiqizhixin.com/rss"},
+        {"name": "钛媒体", "url": "https://www.tmtpost.com/rss"},
         {"name": "36氪",     "url": "https://36kr.com/feed",
          "keywords": ["AI","人工智能","大模型","GPT","ChatGPT","Claude","Gemini","LLM",
                        "机器学习","深度学习","算法","芯片","算力","机器人","自动驾驶",
