@@ -8,6 +8,11 @@ build/
 
 # 本地推送结果备份（如果推送失败时会生成）
 push_result.md
+push_result_v2.md
+digest_backup.md
+
+# n8n 本地 API Key（仅本地 localhost 有效）
+.n8n_api_key.txt
 
 # 编辑器
 .vscode/

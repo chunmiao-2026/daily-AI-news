@@ -1,17 +1,16 @@
-name: 每日 AI 资讯推送
+name: 每日 AI 资讯推送 · 云端备份
 
 on:
-  # 定时触发：北京时间每天 9:03 → UTC 1:03
-  # China 不使用夏令时，永远 UTC+8
+  # 北京时间每天 9:03 → UTC 1:03
   schedule:
     - cron: "3 1 * * *"
 
-  # 也支持手动触发（在 GitHub 网页上点按钮）
+  # 手动触发
   workflow_dispatch:
 
 jobs:
   push-news:
-    name: 抓取资讯并推送微信
+    name: 高质量 RSS 抓取推送（本地不可用时的备份）
     runs-on: ubuntu-latest
 
     steps:
@@ -22,14 +21,14 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: "pip"  # 缓存依赖，加速下次运行
+          cache: "pip"
 
       - name: 安装依赖
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: 运行推送脚本
+      - name: 运行推送（v2 · 高质量源 · 基础格式）
         env:
           SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
-        run: python push_news.py
+        run: python push_news_v2.py

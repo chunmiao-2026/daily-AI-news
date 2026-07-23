@@ -33,9 +33,10 @@ CATEGORIES = {
         "name_cn": "AI 行业动态",
         "name_en": "AI Industry",
         "sources": [
-            {"label": "中文", "url": "https://news.google.com/rss/search?q=AI+%E4%BA%BA%E5%B7%A5%E6%99%BA%E8%83%BD+%E5%A4%A7%E6%A8%A1%E5%9E%8B+%E6%99%BA%E8%83%BD%E4%BD%93&hl=zh-CN&gl=CN&ceid=CN:zh-Hans", "lang": "zh"},
-            {"label": "English", "url": "https://news.google.com/rss/search?q=AI+LLM+agent+launch+latest&hl=en-US&gl=US&ceid=US:en", "lang": "en"},
-            {"label": "English", "url": "https://news.google.com/rss/search?q=artificial+intelligence+startup+funding&hl=en-US&gl=US&ceid=US:en", "lang": "en"},
+            {"label": "TechCrunch AI", "url": "https://techcrunch.com/category/artificial-intelligence/feed/", "lang": "en"},
+            {"label": "VentureBeat AI", "url": "https://venturebeat.com/category/ai/feed/", "lang": "en"},
+            {"label": "The Verge AI", "url": "https://www.theverge.com/ai-artificial-intelligence/rss.xml", "lang": "en"},
+            {"label": "Ars Technica", "url": "https://feeds.arstechnica.com/arstechnica/index", "lang": "en"},
         ],
     },
     "ai_psychology": {
@@ -43,8 +44,8 @@ CATEGORIES = {
         "name_cn": "AI + 心理健康",
         "name_en": "AI + Mental Health",
         "sources": [
-            {"label": "中文", "url": "https://news.google.com/rss/search?q=AI+%E5%BF%83%E7%90%86%E5%81%A5%E5%BA%B7+%E5%BF%83%E7%90%86%E6%B2%BB%E7%96%97+%E6%95%B0%E5%AD%97%E7%96%97%E6%B3%95&hl=zh-CN&gl=CN&ceid=CN:zh-Hans", "lang": "zh"},
-            {"label": "English", "url": "https://news.google.com/rss/search?q=AI+mental+health+therapy+counseling&hl=en-US&gl=US&ceid=US:en", "lang": "en"},
+            {"label": "Psychology Today", "url": "https://www.psychologytoday.com/us/front/rss", "lang": "en"},
+            {"label": "Wired AI", "url": "https://www.wired.com/feed/tag/ai/latest/rss", "lang": "en"},
         ],
     },
     "fertility": {
@@ -52,8 +53,8 @@ CATEGORIES = {
         "name_cn": "辅助生殖行业",
         "name_en": "Fertility & IVF",
         "sources": [
-            {"label": "中文", "url": "https://news.google.com/rss/search?q=%E8%BE%85%E5%8A%A9%E7%94%9F%E6%AE%96+IVF+%E8%AF%95%E7%AE%A1%E5%A9%B4%E5%84%BF+%E7%94%9F%E8%82%B2%E5%8C%BB%E5%AD%A6&hl=zh-CN&gl=CN&ceid=CN:zh-Hans", "lang": "zh"},
-            {"label": "English", "url": "https://news.google.com/rss/search?q=IVF+fertility+assisted+reproduction+latest&hl=en-US&gl=US&ceid=US:en", "lang": "en"},
+            {"label": "Google News IVF", "url": "https://news.google.com/rss/search?q=IVF+fertility+assisted+reproduction&hl=en-US&gl=US&ceid=US:en", "lang": "en"},
+            {"label": "Google News 辅助生育", "url": "https://news.google.com/rss/search?q=辅助生育+试管婴儿+备孕&hl=zh-CN&gl=CN&ceid=CN:zh-Hans", "lang": "zh"},
         ],
     },
     "beijing_events": {
@@ -61,7 +62,7 @@ CATEGORIES = {
         "name_cn": "北京活动",
         "name_en": "Beijing Events",
         "sources": [
-            {"label": "中文", "url": "https://news.google.com/rss/search?q=%E5%8C%97%E4%BA%AC+%E5%B1%95%E4%BC%9A+%E8%AE%BA%E5%9D%9B+AI+%E4%BA%BA%E5%B7%A5%E6%99%BA%E8%83%BD+%E5%BF%83%E7%90%86%E5%81%A5%E5%BA%B7+%E8%BE%85%E5%8A%A9%E7%94%9F%E6%AE%96&hl=zh-CN&gl=CN&ceid=CN:zh-Hans", "lang": "zh"},
+            {"label": "Google News 北京", "url": "https://news.google.com/rss/search?q=%E5%8C%97%E4%BA%AC+%E5%B1%95%E4%BC%9A+%E8%AE%BA%E5%9D%9B+AI+%E4%BA%BA%E5%B7%A5%E6%99%BA%E8%83%BD+%E5%BF%83%E7%90%86%E5%81%A5%E5%BA%B7+%E8%BE%85%E5%8A%A9%E7%94%9F%E6%AE%96&hl=zh-CN&gl=CN&ceid=CN:zh-Hans", "lang": "zh"},
         ],
     },
 }
