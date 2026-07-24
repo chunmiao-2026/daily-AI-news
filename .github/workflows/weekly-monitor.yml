@@ -1,11 +1,7 @@
 name: 行业监测日报
 
 on:
-  # 每天 9:13 推送（北京时间 = UTC 1:13）
-  schedule:
-    - cron: "13 1 * * *"
-
-  # 也支持手动触发
+  # ⛔ 已禁用自动推送（仅保留手动触发）
   workflow_dispatch:
 
 jobs:

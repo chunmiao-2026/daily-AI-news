@@ -1,11 +1,8 @@
 name: 每日 AI 资讯推送 · 云端备份
 
 on:
-  # 北京时间每天 9:03 → UTC 1:03
-  schedule:
-    - cron: "3 1 * * *"
-
-  # 手动触发
+  # ⛔ 已改为手动触发（本地管道为主通道）
+  # 如需手动运行：GitHub → Actions → Run workflow
   workflow_dispatch:
 
 jobs:
