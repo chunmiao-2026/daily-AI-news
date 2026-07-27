@@ -19,6 +19,7 @@ Windows 计划任务：
 """
 
 import feedparser
+import io
 import os
 import sys
 import json
@@ -28,6 +29,11 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+
+# ── 强制 UTF-8 输出（解决 Task Scheduler 等非交互环境的编码错误）──
+if sys.stdout.encoding and sys.stdout.encoding.upper() != "UTF-8":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
 
 # ── 配置 ──────────────────────────────────────────────────────
 SERVERCHAN_KEY = os.environ.get(
