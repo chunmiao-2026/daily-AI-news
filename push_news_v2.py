@@ -39,7 +39,8 @@ ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL") or "deepseek-chat"
 BJT = timezone(timedelta(hours=8))
 
 MAX_PER_SOURCE = 8       # 每个 RSS 源最多取多少条
-MAX_TOTAL_ARTICLES = 60  # 最多喂给 Claude 多少条
+MAX_PER_CATEGORY = 15    # 每个方向最多喂给 Claude 多少条（保证四方向均衡）
+MAX_TOTAL_ARTICLES = 80  # 最多喂给 Claude 多少条
 RSS_TIMEOUT = 20         # RSS 请求超时（秒）
 
 # 给 feedparser 底层的 socket 加默认超时，避免某个源挂起拖死整个 job
@@ -68,11 +69,16 @@ RSS_SOURCES = {
                        "AIGC","多模态","OpenAI","meta","微軟","Anthropic","智能"]},
     ],
     "ai_psychology": [  # 🧠 AI + 心理健康
-        {"name": "Psychology Today", "url": "https://www.psychologytoday.com/us/front/rss"},
+        {"name": "Google News - AI 心理健康", "url": "https://news.google.com/rss/search?q=AI+mental+health+psychology&hl=en-US&gl=US&ceid=US:en"},
+        {"name": "Google News - AI 心理(中)", "url": "https://news.google.com/rss/search?q=AI+心理健康+心理治疗&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"},
     ],
-    "fertility": [      # 🔬 辅助生殖（保留一个精准搜索）
-        {"name": "Google News - IVF",
-         "url": "https://news.google.com/rss/search?q=IVF+fertility+assisted+reproduction&hl=en-US&gl=US&ceid=US:en"},
+    "fertility": [      # 🔬 辅助生殖
+        {"name": "Google News - IVF", "url": "https://news.google.com/rss/search?q=IVF+fertility+assisted+reproduction&hl=en-US&gl=US&ceid=US:en"},
+        {"name": "Google News - 辅助生殖(中)", "url": "https://news.google.com/rss/search?q=辅助生殖+试管婴儿+备孕&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"},
+    ],
+    "beijing_events": [ # 📅 北京展会 / 论坛
+        {"name": "Google News - 北京AI展会", "url": "https://news.google.com/rss/search?q=北京+AI+人工智能+展会+论坛&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"},
+        {"name": "Google News - 北京辅助生殖展会", "url": "https://news.google.com/rss/search?q=北京+辅助生殖+试管婴儿+展会+论坛&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"},
     ],
 }
 
@@ -82,6 +88,7 @@ CATEGORY_LABELS = {
     "ai_chinese":    "📰 中文 AI 资讯",
     "ai_psychology": "🧠 AI + 心理健康",
     "fertility":     "🔬 辅助生殖",
+    "beijing_events": "📅 北京展会 / 论坛",
 }
 
 # ── 工具函数 ──────────────────────────────────────────────────
@@ -238,11 +245,17 @@ def call_claude_for_summary(all_articles: dict) -> str | None:
         print("  ℹ️  未配置 ANTHROPIC_API_KEY，跳过 AI 摘要")
         return None
 
-    # 组装文章文本（扁平化 + 限制总量）
+    # 组装文章文本（每个分类先均衡保留，再全局排序截断，避免某方向挤占其他方向）
     flat_items = []
     for cat, arts in all_articles.items():
         label = CATEGORY_LABELS.get(cat, cat)
-        for art in arts:
+        # 分类内按时间排序，最多取 MAX_PER_CATEGORY 条
+        cat_sorted = sorted(
+            arts,
+            key=lambda a: a["date"] or datetime.min.replace(tzinfo=timezone.utc),
+            reverse=True,
+        )[:MAX_PER_CATEGORY]
+        for art in cat_sorted:
             flat_items.append((label, art))
 
     # 按时间排序（最新的在前），超出上限的截断
@@ -270,26 +283,33 @@ def call_claude_for_summary(all_articles: dict) -> str | None:
     articles_text = "\n\n".join(article_lines)
     today_str = datetime.now(BJT).strftime("%Y-%m-%d")
 
-    system_prompt = """你是每日 AI 资讯的资深编辑，擅长从大量信息中快速筛选出最有价值的资讯。
+    system_prompt = """你是每日资讯的资深编辑，负责从大量信息中筛选出最有价值的资讯，覆盖四个方向。
 
 ## 你的任务
-从提供的原始资讯列表中，**筛选出 5-10 条最重要的**，按主题分组，用中文写出精炼摘要。
+从提供的原始资讯列表中，**按下面四个方向分组**，每个方向筛选出最重要的条目，用中文写出精炼摘要：
+
+1. 🤖 AI 行业与研究 — 大模型进展、AI 公司动态、学术前沿
+2. 🧠 AI + 心理健康 — AI 在心理治疗 / 心理健康领域的应用与进展
+3. 🔬 辅助生殖 — 辅助生育 / 试管婴儿行业的最新资讯
+4. 📅 北京展会 / 论坛 — 北京即将举办的 AI / 心理健康 / 辅助生殖相关展会论坛
 
 ## 筛选原则
-- ✅ 保留：有实质性技术突破的报道、有影响力的公司动态、值得关注的学术论文
-- ❌ 舍弃：纯产品推广软文、标题党、多源重复报道（只保留最好的一条）、与 AI 无关的内容
-- 🌟 优先：能为读者提供「信息差」的内容（大多数人还不知道但应该知道的）
+- **四个方向尽量都有内容**；若某方向当天确实无相关资讯，标注「今日无重要资讯」
+- ✅ 保留：实质性技术突破、有影响力的公司动态、值得关注的论文、真实的展会 / 论坛信息
+- ❌ 舍弃：纯广告软文、标题党、多源重复报道（只留最好一条）
+- 🌟 优先：能提供「信息差」的内容
+- ⚠️ 心理健康、辅助生殖、展会本身就是你要覆盖的方向，不要因为「不属于 AI 领域」而丢弃
 
 ## 输出格式要求
-- 大标题用「📰 每日 AI 精选 · YYYY-MM-DD」
-- 每组主题用小标题，格式为「emoji 主题名」（如 📈 大模型新进展）
+- 大标题用「📰 每日精选 · YYYY-MM-DD」
+- 四个方向各用 emoji 小标题（如上）
 - 每条用「n. **标题**」开头，链接放在标题上
 - 摘要用 `> 一句话核心 + 一句话为什么重要` 的格式
 - 末尾用 `[来源]` 标注
 - 组与组之间用空行分隔
 - **所有内容用中文输出**，英文源的内容翻译为中文概括"""
 
-    user_prompt = f"""今天是 **{today_str}**。以下是今天采集到的 {len(flat_items)} 条 AI 相关资讯：
+    user_prompt = f"""今天是 **{today_str}**。以下是今天采集到的 {len(flat_items)} 条资讯（覆盖 AI / 心理健康 / 辅助生殖 / 北京展会四个方向）：
 
 {articles_text}
 
