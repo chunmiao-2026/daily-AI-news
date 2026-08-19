@@ -22,6 +22,7 @@ import os
 import sys
 import json
 import re
+import socket
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone, timedelta
@@ -30,11 +31,19 @@ from html import unescape
 # ── 配置 ──────────────────────────────────────────────────────
 SERVERCHAN_KEY = os.environ.get("SERVERCHAN_KEY", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+# DeepSeek 走 Anthropic 兼容接口（也可指向官方 api.anthropic.com）
+# 用 `or` 兜底：即使环境变量被注入为空字符串，也回退到默认值
+ANTHROPIC_BASE_URL = os.environ.get("ANTHROPIC_BASE_URL") or "https://api.deepseek.com/anthropic"
+# 摘要模型：deepseek-chat（标准对话模型，直接出正文）；推理模型会先烧 token 在 thinking 上
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL") or "deepseek-chat"
 BJT = timezone(timedelta(hours=8))
 
 MAX_PER_SOURCE = 8       # 每个 RSS 源最多取多少条
 MAX_TOTAL_ARTICLES = 60  # 最多喂给 Claude 多少条
 RSS_TIMEOUT = 20         # RSS 请求超时（秒）
+
+# 给 feedparser 底层的 socket 加默认超时，避免某个源挂起拖死整个 job
+socket.setdefaulttimeout(RSS_TIMEOUT)
 
 # ── 高质量 RSS 源（2026-07-22 全面更新）──────────────────────
 # 替换了原来的 6 个 Google News 低质源
@@ -287,15 +296,16 @@ def call_claude_for_summary(all_articles: dict) -> str | None:
 请按上述要求筛选并输出每日精选。"""
 
     payload = {
-        "model": "claude-sonnet-4-6",
-        "max_tokens": 2500,
+        "model": ANTHROPIC_MODEL,
+        "max_tokens": 3000,
         "system": system_prompt,
         "messages": [{"role": "user", "content": user_prompt}],
     }
 
+    api_url = ANTHROPIC_BASE_URL.rstrip("/") + "/v1/messages"
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages",
+        api_url,
         data=data,
         headers={
             "x-api-key": ANTHROPIC_API_KEY,
@@ -310,10 +320,14 @@ def call_claude_for_summary(all_articles: dict) -> str | None:
         result = json.loads(resp.read().decode("utf-8"))
 
         if "content" in result:
+            # 跳过 reasoning 模型的 thinking 块，只取正文 text 块
             content = "".join(
-                block["text"] for block in result["content"]
+                block.get("text", "") for block in result["content"]
                 if block.get("type") == "text"
             )
+            if not content:
+                print("  ⚠️  模型仅返回 thinking 无正文（可能是推理模型），回退基础格式")
+                return None
             usage = result.get("usage", {})
             print(f"  ✅ Claude API 成功 "
                   f"(输入: {usage.get('input_tokens', '?')} tok, "
