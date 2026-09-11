@@ -3,18 +3,17 @@
 每日 AI 资讯推送 v2 — AI 增强版
 ===============================
 
-改进（2026-07-22）：
-  1. 高质量 RSS 源 — 去掉 Google News，改用 TechCrunch / MIT Tech Review / ArXiv 等
-  2. Claude AI 精选 — 自动筛选最重要的 5-10 条 + 中文摘要
-  3. 主题分组 — 按大模型 / 学术前沿 / 工具产品 等分组，不是按来源罗列
-  4. 中英双语覆盖 — 英文源 → Claude 翻译成中文输出
+改进（2026-09-11）：
+  1. 新鲜度过滤 — 新闻类只收 72h 内，展会类放宽到 60 天
+  2. 跨天去重 — history.json 记住近 7 天发过的标题/链接，彻底消除「连着 3 天相同内容」
+  3. 数据源升级 — AI+心理 / 辅助生殖 改为「PubMed 学术 + Google News 新闻」双轨；北京展会扩充到三类全覆盖
 
 架构：
-  cron-job.org → GitHub Actions → 抓取 RSS → Claude 精选摘要 → ServerChan → 微信
+  cron-job.org → GitHub Actions → 抓取 RSS/PubMed → DeepSeek 精选摘要 → ServerChan → 微信
 
 所需 Secrets（GitHub 仓库 Settings → Secrets and variables → Actions）：
   - SERVERCHAN_KEY    （已有）
-  - ANTHROPIC_API_KEY （需要新增 — 到 https://console.anthropic.com/ 获取）
+  - ANTHROPIC_API_KEY （DeepSeek Key，走 Anthropic 兼容接口）
 """
 
 import feedparser
@@ -27,6 +26,13 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone, timedelta
 from html import unescape
+
+# Windows 控制台默认 GBK，打印 emoji 会报 UnicodeEncodeError；强制 UTF-8 输出（Linux/GH Actions 上无害）
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except Exception:
+    pass
 
 # ── 配置 ──────────────────────────────────────────────────────
 SERVERCHAN_KEY = os.environ.get("SERVERCHAN_KEY", "")
@@ -43,11 +49,26 @@ MAX_PER_CATEGORY = 15    # 每个方向最多喂给 Claude 多少条（保证四
 MAX_TOTAL_ARTICLES = 80  # 最多喂给 Claude 多少条
 RSS_TIMEOUT = 20         # RSS 请求超时（秒）
 
+# 各分类新鲜度窗口（小时）：新闻类 72h，展会类放宽到 60 天（会议提前数周发布）
+FRESH_HOURS = {
+    "ai_industry": 72,
+    "ai_research": 72,
+    "ai_chinese": 72,
+    "ai_psychology": 72,
+    "fertility": 72,
+    "beijing_events": 24 * 60,
+}
+
+# 跨天去重：只对新闻类去重（展会本就该临近多天重复提醒）
+DEDUP_CATEGORIES = {"ai_industry", "ai_research", "ai_chinese", "ai_psychology", "fertility"}
+HISTORY_FILE = "history.json"
+HISTORY_DAYS = 7
+
 # 给 feedparser 底层的 socket 加默认超时，避免某个源挂起拖死整个 job
 socket.setdefaulttimeout(RSS_TIMEOUT)
 
-# ── 高质量 RSS 源（2026-07-22 全面更新）──────────────────────
-# 替换了原来的 6 个 Google News 低质源
+# ── 数据源 ──────────────────────────────────────────────────────
+# 新闻层：Google News 搜索 RSS；学术层：PubMed E-utilities（format="pubmed"）
 RSS_SOURCES = {
     "ai_industry": [    # 🏭 AI 产业动态 — 一线科技媒体
         {"name": "TechCrunch AI",         "url": "https://techcrunch.com/category/artificial-intelligence/feed/"},
@@ -68,17 +89,31 @@ RSS_SOURCES = {
                        "机器学习","深度学习","算法","芯片","算力","机器人","自动驾驶",
                        "AIGC","多模态","OpenAI","meta","微軟","Anthropic","智能"]},
     ],
-    "ai_psychology": [  # 🧠 AI + 心理健康
-        {"name": "Google News - AI 心理健康", "url": "https://news.google.com/rss/search?q=AI+mental+health+psychology&hl=en-US&gl=US&ceid=US:en"},
-        {"name": "Google News - AI 心理(中)", "url": "https://news.google.com/rss/search?q=AI+心理健康+心理治疗&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"},
+    "ai_psychology": [  # 🧠 AI + 心理健康（学术 PubMed + 新闻 Google News）
+        {"name": "PubMed - AI心理健康", "format": "pubmed",
+         "query": "artificial intelligence AND (mental health OR psychotherapy OR psychology)"},
+        {"name": "PubMed - 数字心理干预", "format": "pubmed",
+         "query": "digital mental health OR chatbot therapy OR large language model psychiatry"},
+        {"name": "Google News - AI心理(中)", "url": "https://news.google.com/rss/search?q=AI+心理健康+心理治疗&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"},
+        {"name": "Google News - AI mental health(en)", "url": "https://news.google.com/rss/search?q=AI+mental+health+therapy&hl=en-US&gl=US&ceid=US:en"},
     ],
-    "fertility": [      # 🔬 辅助生殖
-        {"name": "Google News - IVF", "url": "https://news.google.com/rss/search?q=IVF+fertility+assisted+reproduction&hl=en-US&gl=US&ceid=US:en"},
+    "fertility": [      # 🔬 辅助生殖（学术 PubMed + 新闻 Google News）
+        {"name": "PubMed - 辅助生殖技术", "format": "pubmed",
+         "query": "assisted reproduction OR in vitro fertilization OR IVF OR intracytoplasmic sperm injection"},
+        {"name": "PubMed - 生殖医学前沿", "format": "pubmed",
+         "query": "ovarian stimulation OR embryo transfer OR preimplantation genetic testing"},
         {"name": "Google News - 辅助生殖(中)", "url": "https://news.google.com/rss/search?q=辅助生殖+试管婴儿+备孕&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"},
+        {"name": "Google News - IVF(en)", "url": "https://news.google.com/rss/search?q=IVF+fertility+assisted+reproduction&hl=en-US&gl=US&ceid=US:en"},
     ],
-    "beijing_events": [ # 📅 北京展会 / 论坛
-        {"name": "Google News - 北京AI展会", "url": "https://news.google.com/rss/search?q=北京+AI+人工智能+展会+论坛&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"},
-        {"name": "Google News - 北京辅助生殖展会", "url": "https://news.google.com/rss/search?q=北京+辅助生殖+试管婴儿+展会+论坛&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"},
+    "beijing_events": [ # 📅 北京展会 / 论坛（AI + 心理 + 生殖医学 三类，Google News 多关键词）
+        {"name": "北京-AI会议(中)", "url": "https://news.google.com/rss/search?q=北京+人工智能+会议+论坛+峰会+展会&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"},
+        {"name": "北京-AI大会(中)", "url": "https://news.google.com/rss/search?q=北京+人工智能+大会+博览会+展览&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"},
+        {"name": "北京-心理会议(中)", "url": "https://news.google.com/rss/search?q=北京+心理学+学术会议+论坛&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"},
+        {"name": "北京-心理健康会议(中)", "url": "https://news.google.com/rss/search?q=北京+心理健康+会议+论坛+研讨会&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"},
+        {"name": "北京-生殖医学会议(中)", "url": "https://news.google.com/rss/search?q=北京+生殖医学+辅助生殖+试管婴儿+会议+年会&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"},
+        {"name": "北京-生殖医学学术(中)", "url": "https://news.google.com/rss/search?q=北京+生殖医学+学术会议+论坛&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"},
+        {"name": "Beijing-AI-conf(en)", "url": "https://news.google.com/rss/search?q=Beijing+AI+conference+summit+expo&hl=en-US&gl=US&ceid=US:en"},
+        {"name": "Beijing-psych-IVF-conf(en)", "url": "https://news.google.com/rss/search?q=Beijing+psychology+conference+IVF+fertility+reproductive&hl=en-US&gl=US&ceid=US:en"},
     ],
 }
 
@@ -119,6 +154,85 @@ def matches_keywords(text: str, keywords: list) -> bool:
     """检查文本是否包含任一关键词（大小写不敏感）"""
     t = text.lower()
     return any(kw.lower() in t for kw in keywords)
+
+
+def is_fresh(article: dict, category: str) -> bool:
+    """按分类新鲜度窗口过滤：日期缺失或超窗即丢弃"""
+    hours = FRESH_HOURS.get(category, 72)
+    d = article.get("date")
+    if d is None:
+        return False
+    return d > datetime.now(timezone.utc) - timedelta(hours=hours)
+
+
+def normalize_url(link: str) -> str:
+    """规范化 URL 用于跨天去重：去查询串（Google News 的 oc=/utm_ 跟踪参数每天变）、统一小写"""
+    link = (link or "").strip().lower()
+    link = link.split("#")[0]
+    link = link.split("?")[0]
+    return link
+
+
+# ── 跨天去重（history.json）────────────────────────────────────
+
+
+def load_history() -> dict:
+    try:
+        with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if isinstance(data, dict):
+                return data
+    except Exception:
+        pass
+    return {"titles": {}, "urls": {}}
+
+
+def save_history(history: dict) -> None:
+    try:
+        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(history, f, ensure_ascii=False, indent=2)
+        print(f"  💾 去重历史已保存（{len(history.get('titles', {}))} 标题 / {len(history.get('urls', {}))} 链接）")
+    except Exception as e:
+        print(f"  ⚠️  保存去重历史失败（不影响推送）: {e}")
+
+
+def prune_history(history: dict, days: int = HISTORY_DAYS) -> None:
+    """清理超过 N 天的记录，避免文件无限膨胀"""
+    cutoff = (datetime.now(BJT) - timedelta(days=days)).strftime("%Y-%m-%d")
+    for key in ("titles", "urls"):
+        bucket = history.get(key)
+        if isinstance(bucket, dict):
+            for k in [k for k, v in bucket.items() if v < cutoff]:
+                del bucket[k]
+
+
+def filter_seen(articles: list, history: dict) -> list:
+    """过滤掉近 7 天已推送过的标题/链接"""
+    seen_titles = set(history.get("titles", {}).keys())
+    seen_urls = set(history.get("urls", {}).keys())
+    result = []
+    for art in articles:
+        t = art["title"].lower().strip()
+        u = normalize_url(art.get("link", ""))
+        if t and t in seen_titles:
+            continue
+        if u and u in seen_urls:
+            continue
+        result.append(art)
+    return result
+
+
+def record_seen(articles: list, history: dict, today: str) -> None:
+    """把当天抓取到的新闻类文章记入历史"""
+    titles = history.setdefault("titles", {})
+    urls = history.setdefault("urls", {})
+    for art in articles:
+        t = art["title"].lower().strip()
+        u = normalize_url(art.get("link", ""))
+        if t:
+            titles[t] = today
+        if u:
+            urls[u] = today
 
 
 # ── 抓取 RSS ──────────────────────────────────────────────────
@@ -221,6 +335,74 @@ def fetch_hf_papers() -> list[dict]:
         return []
 
 
+def fetch_pubmed(query: str, name: str) -> list[dict]:
+    """通过 PubMed E-utilities 抓取最新论文（学术层，免费稳定）"""
+    if not query:
+        return []
+
+    try:
+        # esearch：按 pub_date 倒序取最新论文 ID
+        esearch_url = (
+            "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+            f"?db=pubmed&term={urllib.parse.quote(query)}"
+            f"&retmax={MAX_PER_SOURCE}&sort=pub_date&retmode=json"
+        )
+        req = urllib.request.Request(esearch_url, headers={"User-Agent": "Mozilla/5.0"})
+        data = json.loads(urllib.request.urlopen(req, timeout=RSS_TIMEOUT).read().decode("utf-8"))
+        ids = data.get("esearchresult", {}).get("idlist", [])
+        if not ids:
+            print(f"  📭 {name}: 0 条")
+            return []
+
+        # esummary：批量取标题/期刊/日期/作者
+        esummary_url = (
+            "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
+            f"?db=pubmed&id={','.join(ids)}&retmode=json"
+        )
+        req2 = urllib.request.Request(esummary_url, headers={"User-Agent": "Mozilla/5.0"})
+        sdata = json.loads(urllib.request.urlopen(req2, timeout=RSS_TIMEOUT).read().decode("utf-8"))
+        result = sdata.get("result", {})
+
+        articles = []
+        for pmid in ids:
+            doc = result.get(pmid, {})
+            if not isinstance(doc, dict):
+                continue
+            title = clean_html(doc.get("title", ""))
+            if not title:
+                continue
+
+            # 解析日期：优先 epubdate（电子上线日期），回退 pubdate（出刊日期可能含未来日期）
+            pub_date = None
+            date_str = doc.get("epubdate", "") or doc.get("pubdate", "")
+            for fmt in ("%Y %b %d", "%Y %b", "%Y"):
+                try:
+                    pub_date = datetime.strptime(date_str, fmt).replace(tzinfo=timezone.utc)
+                    break
+                except Exception:
+                    continue
+
+            journal = doc.get("fulljournalname", "") or doc.get("source", "")
+            authors = ", ".join(a.get("name", "") for a in doc.get("authors", [])[:3])
+            meta = " ".join(x for x in [authors, journal] if x)
+            summary = meta if meta else "学术论文"
+
+            articles.append({
+                "title": title,
+                "link": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
+                "summary": summary,
+                "date": pub_date,
+                "source_name": name,
+            })
+
+        print(f"  ✅ {name}: {len(articles)} 条")
+        return articles
+
+    except Exception as e:
+        print(f"  ❌ {name}: 请求异常 - {e}")
+        return []
+
+
 def deduplicate(articles: list[dict]) -> list[dict]:
     """按标题去重（大小写不敏感）"""
     seen = set()
@@ -286,25 +468,34 @@ def call_claude_for_summary(all_articles: dict) -> str | None:
     system_prompt = """你是每日资讯的资深编辑，负责从大量信息中筛选出最有价值的资讯，覆盖四个方向。
 
 ## 你的任务
-从提供的原始资讯列表中，**按下面四个方向分组**，每个方向筛选出最重要的条目，用中文写出精炼摘要：
+从提供的原始资讯列表中，按下面四个方向分组筛选，用中文写精炼摘要：
 
 1. 🤖 AI 行业与研究 — 大模型进展、AI 公司动态、学术前沿
-2. 🧠 AI + 心理健康 — AI 在心理治疗 / 心理健康领域的应用与进展
-3. 🔬 辅助生殖 — 辅助生育 / 试管婴儿行业的最新资讯
-4. 📅 北京展会 / 论坛 — 北京即将举办的 AI / 心理健康 / 辅助生殖相关展会论坛
+2. 🧠 AI + 心理健康 — AI 在心理治疗/心理健康的应用；分「新闻动态」和「学术/专业」两个子块
+3. 🔬 辅助生殖 — 辅助生育/试管婴儿行业动态；分「新闻动态」和「学术/专业」两个子块
+4. 📅 北京展会 / 论坛 — 北京即将举办的 AI / 心理健康 / 辅助生殖相关会议、展会、论坛
+
+## 来源识别
+原始资讯的 [来源] 里，含「PubMed」的是学术论文（归入「学术/专业」子块），含「News」的是新闻（归入「新闻动态」子块）。
 
 ## 筛选原则
-- **四个方向尽量都有内容**；若某方向当天确实无相关资讯，标注「今日无重要资讯」
-- ✅ 保留：实质性技术突破、有影响力的公司动态、值得关注的论文、真实的展会 / 论坛信息
-- ❌ 舍弃：纯广告软文、标题党、多源重复报道（只留最好一条）
+- 四个方向尽量都有内容；某方向当天确实无相关资讯，标注「今日无重要资讯」
+- ✅ 保留：实质性技术突破、有影响力的公司动态、值得关注的论文、真实的会议信息
+- ❌ 舍弃：纯广告软文、标题党、多源重复报道（只留最好一条）、过期/已结束的活动
 - 🌟 优先：能提供「信息差」的内容
-- ⚠️ 心理健康、辅助生殖、展会本身就是你要覆盖的方向，不要因为「不属于 AI 领域」而丢弃
 
-## 输出格式要求
+## 北京展会方向特别要求
+- 只保留**真实、有明确时间/地点/主办方**的会议/展会/论坛；无法确认时间地点的宁可不列
+- 优先**未来**即将举办的活动，标注会议日期；已结束的一律舍弃
+- 覆盖 AI、心理健康、辅助生殖三个主题，缺哪类就注明
+- 同类会议合并成一条呈现，避免罗列同质信息
+
+## 输出格式
 - 大标题用「📰 每日精选 · YYYY-MM-DD」
-- 四个方向各用 emoji 小标题（如上）
+- 四个方向各用 emoji 小标题
 - 每条用「n. **标题**」开头，链接放在标题上
-- 摘要用 `> 一句话核心 + 一句话为什么重要` 的格式
+- 摘要用 `> 一句话核心 + 一句话为什么重要` 格式
+- 学术论文标注期刊名/年份
 - 末尾用 `[来源]` 标注
 - 组与组之间用空行分隔
 - **所有内容用中文输出**，英文源的内容翻译为中文概括"""
@@ -399,7 +590,7 @@ def build_basic_markdown(all_articles: dict) -> str:
 
     lines.append("---")
     lines.append(f"🕐 {datetime.now(BJT).strftime('%Y-%m-%d %H:%M')}")
-    lines.append("📡 来源: RSS 聚合（v2 基础版）")
+    lines.append("📡 来源: RSS + PubMed 聚合（v2 基础版）")
     return "\n".join(lines)
 
 
@@ -410,7 +601,7 @@ def build_ai_markdown(claude_summary: str) -> str:
         f"{claude_summary}\n\n"
         f"---\n"
         f"🤖 Claude 筛选 · 🕐 {now.strftime('%Y-%m-%d %H:%M')}\n"
-        f"📡 来源: TechCrunch / MIT TR / ArXiv / HF Papers 等"
+        f"📡 来源: TechCrunch / ArXiv / PubMed / Google News 等"
     )
 
 
@@ -450,19 +641,37 @@ def main():
 
     all_articles: dict[str, list[dict]] = {cat: [] for cat in RSS_SOURCES}
 
-    # 1. 抓取所有 RSS 源
+    # 0. 加载跨天去重历史
+    history = load_history()
+    prune_history(history)
+    today_str = datetime.now(BJT).strftime("%Y-%m-%d")
+    print(f"📜 去重历史已加载（近 {HISTORY_DAYS} 天）")
+
+    # 1. 抓取所有源
     for category, sources in RSS_SOURCES.items():
         label = CATEGORY_LABELS.get(category, category)
         print(f"\n📂 {label}")
         for source in sources:
-            if source.get("format") == "json":
+            fmt = source.get("format")
+            if fmt == "json":
                 all_articles[category].extend(fetch_hf_papers())
+            elif fmt == "pubmed":
+                all_articles[category].extend(fetch_pubmed(source.get("query", ""), source["name"]))
             else:
                 all_articles[category].extend(fetch_feed(source))
 
-        # 去重
+        # 去重（标题）
         all_articles[category] = deduplicate(all_articles[category])
-        print(f"  → 共 {len(all_articles[category])} 条（去重后）")
+        # 新鲜度过滤
+        all_articles[category] = [a for a in all_articles[category] if is_fresh(a, category)]
+        # 跨天去重（仅新闻类）
+        if category in DEDUP_CATEGORIES:
+            before = len(all_articles[category])
+            all_articles[category] = filter_seen(all_articles[category], history)
+            dropped = before - len(all_articles[category])
+            if dropped:
+                print(f"  🚫 跨天去重剔除 {dropped} 条（近 {HISTORY_DAYS} 天已发过）")
+        print(f"  → 共 {len(all_articles[category])} 条（去重+新鲜度过滤后）")
 
     # 2. 统计
     total = sum(len(v) for v in all_articles.values())
@@ -493,6 +702,11 @@ def main():
     print(f"\n📤 推送到微信...")
     title = f"每日 AI 精选 · {datetime.now(BJT).strftime('%Y-%m-%d')}"
     success = send_serverchan(title, markdown)
+
+    # 5. 记录当天新闻类文章到去重历史（无论推送是否成功，抓取到的都记，避免下次重复）
+    for category in DEDUP_CATEGORIES:
+        record_seen(all_articles[category], history, today_str)
+    save_history(history)
 
     if not success:
         print("⚠️  推送失败，内容已保存到 push_result.md")

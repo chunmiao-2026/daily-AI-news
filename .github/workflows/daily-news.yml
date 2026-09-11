@@ -9,6 +9,9 @@ jobs:
   push-news:
     name: 高质量 RSS 抓取 + DeepSeek AI 精选
     runs-on: ubuntu-latest
+    # 需要写权限，用于把 history.json（跨天去重历史）提交回仓库
+    permissions:
+      contents: write
 
     steps:
       - name: 检出代码
@@ -30,3 +33,15 @@ jobs:
           SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python push_news_v2.py
+
+      - name: 提交去重历史 history.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add history.json
+          if git diff --cached --quiet; then
+            echo "history.json 无变化，跳过提交"
+          else
+            git commit -m "chore: 更新跨天去重历史 history.json"
+            git push
+          fi
